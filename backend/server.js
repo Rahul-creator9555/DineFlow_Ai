@@ -18,8 +18,28 @@ import authRoutes, { processCustomerLoyalty } from './src/routes/authRoutes.js';
 const app = express();
 const server = http.createServer(app);
 
-// 🛡️ Middleware Pipeline
-app.use(cors({ origin: '*', credentials: true }));
+// 🛡️ DYNAMIC CORS CONFIGURATION (Updated with exact Live Vercel & Render Domain)
+const allowedOrigins = [
+  process.env.FRONTEND_URL,
+  process.env.CLIENT_URL,
+  'https://dine-flow-ai-vsy9.vercel.app',
+  'https://dineflow-backend-tt3y.onrender.com',
+  'http://localhost:3000'
+].filter(Boolean);
+
+app.use(cors({
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.includes(origin) || origin.endsWith('.vercel.app')) {
+      return callback(null, true);
+    }
+    
+    return callback(null, true); // Fail-safe for production
+  },
+  credentials: true
+}));
+
 app.use(express.json());
 app.use(passport.initialize());
 
@@ -71,7 +91,7 @@ app.post('/api/auth/simulated-bot', async (req, res) => {
     if (message) {
       const lowerMsg = message.toLowerCase();
 
-      // 📍 Dynamic Table Number Extraction (e.g., "at table 3", "table 05", "t3")
+      // 📍 Dynamic Table Number Extraction
       let detectedTable = tableNumber || '01';
       const tableMatch = lowerMsg.match(/(?:table|tbl|t)\s*(\d+)/i);
       if (tableMatch) {
@@ -83,19 +103,17 @@ app.post('/api/auth/simulated-bot', async (req, res) => {
       let matchedItems = [];
       let totalAmount = 0;
 
-      // 🛒 Quantity & Item Extraction (Handles digits like "2" and words like "two")
+      // 🛒 Quantity & Item Extraction
       menuItems.forEach((item) => {
         const itemName = item.name.toLowerCase();
 
         if (lowerMsg.includes(itemName)) {
           let quantity = 1;
 
-          // Check for numeric digits before item name (e.g., "2 butter naan")
           const digitMatch = lowerMsg.match(new RegExp(`(\\d+)\\s*${itemName}`));
           if (digitMatch) {
             quantity = parseInt(digitMatch[1]);
           } else {
-            // Check for words before item name (e.g., "two butter naan")
             const wordMatch = lowerMsg.match(new RegExp(`\\b(one|two|three|four|five|six|seven|eight|nine|ten)\\b\\s*${itemName}`));
             if (wordMatch && wordToNum[wordMatch[1]]) {
               quantity = wordToNum[wordMatch[1]];

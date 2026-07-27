@@ -8,6 +8,12 @@ import {
   ChevronUp, ChevronDown, Eye, EyeOff, Sun, Moon, Calendar, Users
 } from 'lucide-react';
 
+// 🌐 Dynamic Production API Base Endpoint Configuration
+const API_BASE_URL = 
+  process.env.NEXT_PUBLIC_API_BASE_URL || 
+  process.env.NEXT_PUBLIC_BACKEND_URL || 
+  'https://dineflow-backend-tt3y.onrender.com';
+
 export default function ManagerDashboard() {
   const [menu, setMenu] = useState([]);
   const [reservations, setReservations] = useState([]);
@@ -42,12 +48,12 @@ export default function ManagerDashboard() {
     setTimeout(() => setToast(null), 3000);
   };
 
-  // Fetch Menu, Reservations & Real-time Stats dynamically
+  // Fetch Menu, Reservations & Real-time Stats dynamically from Live Backend
   const fetchDashboardData = () => {
     Promise.all([
-      fetch('http://localhost:5000/api/menu').then((res) => res.json()).catch(() => []),
-      fetch('http://localhost:5000/api/reservations').then((res) => res.json()).catch(() => []),
-      fetch('http://localhost:5000/api/stats').then((res) => res.json()).catch(() => ({ todayRevenue: 0, occupiedTables: 0 }))
+      fetch(`${API_BASE_URL}/api/menu`).then((res) => res.json()).catch(() => []),
+      fetch(`${API_BASE_URL}/api/reservations`).then((res) => res.json()).catch(() => []),
+      fetch(`${API_BASE_URL}/api/stats`).then((res) => res.json()).catch(() => ({ todayRevenue: 0, occupiedTables: 0 }))
     ])
       .then(([menuData, resData, statsData]) => {
         setMenu(Array.isArray(menuData) ? menuData : []);
@@ -115,8 +121,8 @@ export default function ManagerDashboard() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     const url = editingItem
-      ? `http://localhost:5000/api/menu/${editingItem._id}`
-      : 'http://localhost:5000/api/menu';
+      ? `${API_BASE_URL}/api/menu/${editingItem._id}`
+      : `${API_BASE_URL}/api/menu`;
     const method = editingItem ? 'PUT' : 'POST';
 
     try {
@@ -137,7 +143,7 @@ export default function ManagerDashboard() {
 
   const handleDelete = async (id) => {
     try {
-      await fetch(`http://localhost:5000/api/menu/${id}`, { method: 'DELETE' });
+      await fetch(`${API_BASE_URL}/api/menu/${id}`, { method: 'DELETE' });
       setDeleteConfirm(null);
       fetchDashboardData();
       showToast('Dish removed from menu');
@@ -148,10 +154,10 @@ export default function ManagerDashboard() {
 
   const toggleAvailability = async (item) => {
     try {
-      await fetch(`http://localhost:5000/api/menu/${item._id}`, {
+      await fetch(`${API_BASE_URL}/api/menu/${item._id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ isAvailable: !item.isAvailable })
+        body: JSON.stringify({ ...item, isAvailable: !item.isAvailable })
       });
       fetchDashboardData();
       showToast(item.isAvailable ? 'Marked as Sold Out' : 'Back in stock');
@@ -163,10 +169,10 @@ export default function ManagerDashboard() {
   const adjustStock = async (item, delta) => {
     const newStock = Math.max(0, (item.stockCount || 0) + delta);
     try {
-      await fetch(`http://localhost:5000/api/menu/${item._id}`, {
+      await fetch(`${API_BASE_URL}/api/menu/${item._id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ stockCount: newStock })
+        body: JSON.stringify({ ...item, stockCount: newStock, isAvailable: newStock > 0 })
       });
       fetchDashboardData();
     } catch (err) {

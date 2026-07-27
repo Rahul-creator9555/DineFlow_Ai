@@ -4,7 +4,11 @@ import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { UtensilsCrossed, Mail, Lock, User, ArrowRight } from 'lucide-react';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5000';
+// 🌐 Dynamic API Base URL with Deployment Fallback
+const API_BASE_URL = 
+  process.env.NEXT_PUBLIC_API_BASE_URL || 
+  process.env.NEXT_PUBLIC_BACKEND_URL || 
+  'https://dineflow-backend.onrender.com';
 
 function AuthContent() {
   const router = useRouter();
@@ -259,7 +263,7 @@ function AuthContent() {
   );
 }
 
-// 🛑 EXPORT WITH SUSPENSE WRAPPER (Fixes Next.js Vercel Build Error)
+// 🛑 EXPORT WITH SUSPENSE WRAPPER
 export default function AuthPage() {
   return (
     <Suspense fallback={<div className="min-h-screen bg-[#0F0F10] text-white flex items-center justify-center font-sans text-xs">Loading Auth Session...</div>}>

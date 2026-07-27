@@ -8,6 +8,12 @@ import {
   Sun, Moon, CheckCheck, Sparkles, Filter, Package, ChevronUp, ChevronDown, Eye, EyeOff 
 } from 'lucide-react';
 
+// 🌐 Dynamic Production API Endpoint Configuration
+const API_BASE_URL = 
+  process.env.NEXT_PUBLIC_API_BASE_URL || 
+  process.env.NEXT_PUBLIC_BACKEND_URL || 
+  'https://dineflow-backend.onrender.com';
+
 export default function KitchenDashboard() {
   const [orders, setOrders] = useState([]);
   const [menuItems, setMenuItems] = useState([]);
@@ -35,7 +41,7 @@ export default function KitchenDashboard() {
   };
 
   const fetchMenu = () => {
-    fetch('http://localhost:5000/api/menu')
+    fetch(`${API_BASE_URL}/api/menu`)
       .then((res) => res.json())
       .then((data) => setMenuItems(Array.isArray(data) ? data : []))
       .catch((err) => console.error('Error fetching menu:', err));
@@ -51,7 +57,7 @@ export default function KitchenDashboard() {
     socket.on('disconnect', () => setIsConnected(false));
 
     // Fetch initial active orders
-    fetch('http://localhost:5000/api/orders/pending')
+    fetch(`${API_BASE_URL}/api/orders/pending`)
       .then((res) => res.json())
       .then((data) => setOrders(Array.isArray(data) ? data : []))
       .catch((err) => console.error('Error fetching orders:', err));
@@ -74,7 +80,7 @@ export default function KitchenDashboard() {
 
   const updateOrderStatus = async (orderId, newStatus) => {
     try {
-      await fetch(`http://localhost:5000/api/orders/${orderId}/status`, {
+      await fetch(`${API_BASE_URL}/api/orders/${orderId}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: newStatus }),
@@ -96,10 +102,10 @@ export default function KitchenDashboard() {
   // Chef Action 1: Toggle Dish Availability (In Stock / Sold Out)
   const toggleItemAvailability = async (item) => {
     try {
-      await fetch(`http://localhost:5000/api/menu/${item._id}`, {
+      await fetch(`${API_BASE_URL}/api/menu/${item._id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ isAvailable: !item.isAvailable }),
+        body: JSON.stringify({ ...item, isAvailable: !item.isAvailable }),
       });
       fetchMenu();
     } catch (err) {
@@ -111,10 +117,10 @@ export default function KitchenDashboard() {
   const adjustStock = async (item, delta) => {
     const newStock = Math.max(0, (item.stockCount || 0) + delta);
     try {
-      await fetch(`http://localhost:5000/api/menu/${item._id}`, {
+      await fetch(`${API_BASE_URL}/api/menu/${item._id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ stockCount: newStock }),
+        body: JSON.stringify({ ...item, stockCount: newStock, isAvailable: newStock > 0 }),
       });
       fetchMenu();
     } catch (err) {

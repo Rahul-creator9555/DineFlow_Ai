@@ -10,8 +10,9 @@ const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'dineflow_secret_key_2026';
 
 // 🌐 Dynamic Production/Local Environment URLs
+// Top section me line 11-12 ko is tarah safe kar lo:
 const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:5000';
-const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+const FRONTEND_URL = process.env.FRONTEND_URL || process.env.CLIENT_URL || 'http://localhost:3000';
 
 // --------------------------------------------------
 // 🔑 PASSPORT GOOGLE OAUTH STRATEGY CONFIGURATION

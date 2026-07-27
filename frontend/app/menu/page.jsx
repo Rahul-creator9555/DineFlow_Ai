@@ -8,7 +8,11 @@ import {
   Sun, Moon, Plus, Minus, CheckCircle, X, ArrowRight, UserCheck 
 } from 'lucide-react';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5000';
+// 🌐 Dynamic Production API Endpoint Configuration
+const API_BASE_URL = 
+  process.env.NEXT_PUBLIC_API_BASE_URL || 
+  process.env.NEXT_PUBLIC_BACKEND_URL || 
+  'https://dineflow-backend-tt3y.onrender.com';
 
 export default function CustomerMenu() {
   const [menu, setMenu] = useState([]);

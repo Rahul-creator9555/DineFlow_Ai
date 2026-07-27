@@ -442,9 +442,15 @@ export function initTelegramBot() {
     }
   });
 
-  bot.launch()
+  // Replace the bottom launch block with this error-proof launcher:
+  bot.launch({
+    dropPendingUpdates: true // Ignores old accumulated messages on bot restart
+  })
     .then(() => console.log('🤖 Telegram Bot running (Optimized & Stock Sync Safe)'))
-    .catch((err) => console.error('Bot launch failed:', err));
+    .catch((err) => {
+      console.error('⚠️ Telegram Bot Launch Error:', err.message);
+      // Prevents whole Node process from crashing if Telegram API drops
+    });
 
   process.once('SIGINT', () => bot.stop('SIGINT'));
   process.once('SIGTERM', () => bot.stop('SIGTERM'));
