@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { UtensilsCrossed, LayoutDashboard, ChefHat, LogOut, LogIn } from 'lucide-react';
 
 export default function Navbar() {
   const router = useRouter();
@@ -9,58 +10,97 @@ export default function Navbar() {
 
   useEffect(() => {
     const savedUser = localStorage.getItem('user');
-    if (savedUser) setUser(JSON.parse(savedUser));
+    if (savedUser) {
+      try {
+        setUser(JSON.parse(savedUser));
+      } catch (e) {
+        console.error('Error parsing user data:', e);
+      }
+    }
   }, []);
 
   const handleLogout = () => {
     localStorage.clear();
+    setUser(null);
     router.push('/login');
   };
 
   return (
-    <nav className="bg-slate-900 border-b border-slate-800 px-6 py-4 flex justify-between items-center text-white">
-      <div className="flex items-center gap-6">
-        <span className="text-xl font-black text-amber-400 tracking-wider cursor-pointer" onClick={() => router.push('/')}>
-          DineFlow AI 🚀
-        </span>
-
-        {user && (
-          <div className="hidden md:flex gap-4 text-sm font-semibold text-slate-300">
-            {(user.role === 'manager' || user.role === 'admin') && (
-              <button onClick={() => router.push('/manager')} className="hover:text-amber-400">
-                📊 Manager Panel
-              </button>
-            )}
-            {(user.role === 'kitchen' || user.role === 'admin' || user.role === 'manager') && (
-              <button onClick={() => router.push('/kitchen')} className="hover:text-amber-400">
-                👨‍🍳 Kitchen KDS
-              </button>
-            )}
-            {(user.role === 'waiter' || user.role === 'admin' || user.role === 'manager') && (
-              <button onClick={() => router.push('/waiter')} className="hover:text-amber-400">
-                🛎️ Waiter Tasks
-              </button>
-            )}
-            <button onClick={() => router.push('/menu')} className="hover:text-amber-400">
-              📖 Digital Menu
-            </button>
+    <nav className="bg-[#1A1A1C]/90 backdrop-blur-md border-b border-[#2E2E32] px-6 py-3.5 flex justify-between items-center text-white sticky top-0 z-40 transition-all">
+      {/* LEFT: BRAND & NAV LINKS */}
+      <div className="flex items-center gap-8">
+        <div 
+          className="flex items-center gap-2 cursor-pointer group" 
+          onClick={() => router.push('/menu')}
+        >
+          <div className="p-2 bg-[#E67E33] text-white rounded-xl shadow-md shadow-[#E67E33]/30 group-hover:scale-105 transition">
+            <UtensilsCrossed className="w-5 h-5" />
           </div>
-        )}
+          <span className="text-xl font-black tracking-tight text-white">
+            DineFlow <span className="text-[#E67E33]">AI</span>
+          </span>
+        </div>
+
+        {/* ROLE BASED NAVIGATION LINKS */}
+        <div className="hidden md:flex items-center gap-2 text-xs font-bold text-[#9E9EAC]">
+          {/* Public Digital Menu for Everyone */}
+          <button 
+            onClick={() => router.push('/menu')} 
+            className="px-3.5 py-2 rounded-xl hover:text-white hover:bg-[#2E2E32] transition flex items-center gap-1.5"
+          >
+            <UtensilsCrossed className="w-3.5 h-3.5 text-[#E67E33]" />
+            Digital Menu
+          </button>
+
+          {/* MANAGER ONLY LINK */}
+          {user && (user.role === 'manager' || user.role === 'admin') && (
+            <button 
+              onClick={() => router.push('/manager')} 
+              className="px-3.5 py-2 rounded-xl hover:text-white hover:bg-[#2E2E32] transition flex items-center gap-1.5 text-amber-400"
+            >
+              <LayoutDashboard className="w-3.5 h-3.5" />
+              Manager Panel
+            </button>
+          )}
+
+          {/* KITCHEN KDS LINK (Accessible by Kitchen Chef, Manager & Admin) */}
+          {user && (user.role === 'kitchen' || user.role === 'manager' || user.role === 'admin') && (
+            <button 
+              onClick={() => router.push('/kitchen')} 
+              className="px-3.5 py-2 rounded-xl hover:text-white hover:bg-[#2E2E32] transition flex items-center gap-1.5 text-emerald-400"
+            >
+              <ChefHat className="w-3.5 h-3.5" />
+              Kitchen KDS
+            </button>
+          )}
+        </div>
       </div>
 
+      {/* RIGHT: STAFF AUTH STATUS */}
       <div>
         {user ? (
-          <div className="flex items-center gap-4">
-            <span className="text-xs bg-slate-800 border border-slate-700 px-3 py-1 rounded-full text-amber-300 capitalize">
-              {user.name} ({user.role})
-            </span>
-            <button onClick={handleLogout} className="text-xs bg-rose-900/60 hover:bg-rose-800 text-rose-200 font-bold px-3 py-1.5 rounded-lg border border-rose-700">
-              Logout
+          <div className="flex items-center gap-3">
+            <div className="bg-[#0F0F10] border border-[#2E2E32] px-3 py-1.5 rounded-2xl flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span className="text-xs font-extrabold text-white capitalize">
+                {user.name} <span className="text-[#E67E33] text-[10px]">({user.role})</span>
+              </span>
+            </div>
+
+            <button 
+              onClick={handleLogout} 
+              className="p-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-xl border border-rose-500/20 transition flex items-center justify-center"
+              title="Logout Staff"
+            >
+              <LogOut className="w-4 h-4" />
             </button>
           </div>
         ) : (
-          <button onClick={() => router.push('/login')} className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-4 py-2 rounded-lg">
-            Sign In
+          <button 
+            onClick={() => router.push('/login')} 
+            className="bg-[#1A1A1C] hover:bg-[#2E2E32] border border-[#2E2E32] text-[#9E9EAC] hover:text-white font-bold text-xs px-4 py-2 rounded-xl transition flex items-center gap-2"
+          >
+            <LogIn className="w-3.5 h-3.5" /> Staff Portal
           </button>
         )}
       </div>

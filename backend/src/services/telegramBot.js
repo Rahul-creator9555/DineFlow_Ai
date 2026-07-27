@@ -1,192 +1,451 @@
-import { Telegraf } from 'telegraf';
+import { Telegraf, session, Markup } from 'telegraf';
 import { message } from 'telegraf/filters';
 import MenuItem from '../models/MenuItem.js';
 import Order from '../models/Order.js';
+import Reservation from '../models/Reservation.js';
 import { parseAudioOrder, parseTextOrder } from './aiService.js';
 import { getIO } from '../socket/socketHandler.js';
 import { processCustomerLoyalty } from '../routes/authRoutes.js';
 
+let botInstance = null;
+
+// Simple in-memory rate limiter
+const rateLimitMap = new Map();
+const RATE_LIMIT_WINDOW = 30_000; // 30 seconds
+const RATE_LIMIT_MAX = 8;
+
+// Menu cache
+let menuCache = { items: [], expiresAt: 0 };
+const MENU_CACHE_TTL = 30_000;
+
+export function sendTelegramMessage(chatId, text) {
+  if (botInstance && chatId) {
+    botInstance.telegram
+      .sendMessage(chatId, text, { parse_mode: 'Markdown' })
+      .catch((err) => console.error('⚠️ Telegram push error:', err.message));
+  }
+}
+
+function escapeMarkdown(text = '') {
+  return String(text).replace(/([_*`\[])/g, '\\$1');
+}
+
+function extractTableNumber(text) {
+  if (!text) return null;
+  const match = text.match(/(?:table|t|tab|tbl)\s*(?:no\.?|number|#)?\s*(\d{1,3})/i)
+    || text.match(/^(\d{1,2})\s*[:\-]/);
+  return match ? match[1].padStart(2, '0') : null;
+}
+
+async function getActiveMenu() {
+  if (Date.now() < menuCache.expiresAt) return menuCache.items;
+  const items = await MenuItem.find({ isAvailable: true }).lean();
+  menuCache = { items, expiresAt: Date.now() + MENU_CACHE_TTL };
+  return items;
+}
+
+function isRateLimited(userId) {
+  const now = Date.now();
+  const entry = rateLimitMap.get(userId) || { count: 0, resetAt: now + RATE_LIMIT_WINDOW };
+
+  if (now > entry.resetAt) {
+    entry.count = 1;
+    entry.resetAt = now + RATE_LIMIT_WINDOW;
+  } else {
+    entry.count += 1;
+  }
+
+  rateLimitMap.set(userId, entry);
+  return entry.count > RATE_LIMIT_MAX;
+}
+
 export function initTelegramBot() {
   const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
+  botInstance = bot;
 
-  // 1. /start Command Handler (Prompts for Contact Share)
+  bot.use(session());
+
+  bot.catch((err, ctx) => {
+    console.error('❌ Bot error for', ctx.from?.id, err);
+    ctx.reply('⚠️ Something went wrong. Please try again in a moment.').catch(() => {});
+  });
+
+  const mainKeyboard = Markup.keyboard([
+    ['📖 View Menu', '⚡ Active Orders'],
+    ['📅 Book a Table', '💳 Pay Bill & Leave'],
+    [Markup.button.contactRequest('📱 Share Phone for Discounts')]
+  ]).resize().persistent();
+
+  // ─── /start ───────────────────────────────────────────────
   bot.start(async (ctx) => {
-    const userName = ctx.from.first_name || 'Guest';
-
+    const name = escapeMarkdown(ctx.from.first_name || 'Guest');
     await ctx.reply(
-      `👋 *Welcome to DineFlow AI, ${userName}!*\n\nOrder instantly by typing a message OR sending a voice note in English, Hindi, or Hinglish!\n\nTo sync your Web & Telegram loyalty perks (Free Dessert, Free Drinks & Discounts), tap the button below to share your contact:`,
-      {
-        parse_mode: 'Markdown',
-        reply_markup: {
-          keyboard: [
-            [{ text: '📱 Share Phone Number for Loyalty Perks', request_contact: true }]
-          ],
-          one_time_keyboard: true,
-          resize_keyboard: true
-        }
-      }
+      `👋 *Welcome to DineFlow AI, ${name}!*\n\n` +
+      `Order food or reserve tables by typing, clicking buttons, or sending a *voice note* (English / Hindi / Hinglish).\n\n` +
+      `• *Order example:* \`Table 3: 1 Paneer Tikka + 2 Butter Naan\`\n` +
+      `• *Reserve example:* \`Book table for 4 at 8 PM today\``,
+      { parse_mode: 'Markdown', ...mainKeyboard }
     );
   });
 
-  // 2. 📲 Contact Receive Handler (Syncs Phone with Web App Loyalty Profile)
-  bot.on(message('contact'), async (ctx) => {
-    const phoneNumber = ctx.message.contact.phone_number;
-    const userName = ctx.from.first_name || 'Guest';
-
-    // Process loyalty using the actual phone number
-    const { customer, perk } = await processCustomerLoyalty(userName, phoneNumber);
-
-    let msg = `✅ *Phone Number Linked!* (${phoneNumber})\n\n`;
-    msg += `📊 *Your Loyalty Status:* Visit #${customer.visitCount}\n`;
-
-    if (perk) {
-      msg += `\n${perk.title}\n_${perk.description}_\n`;
-    } else {
-      const remaining = 11 - customer.visitCount;
-      if (remaining > 0) {
-        msg += `\n💡 _Complete ${remaining} more visit(s) to unlock a Free Dessert!_ 🍨\n`;
-      }
-    }
-
-    // Hide custom keyboard and send status update
-    await ctx.replyWithMarkdown(msg, { reply_markup: { remove_keyboard: true } });
+  bot.command('help', async (ctx) => {
+    await ctx.reply(
+      `📖 *How to use DineFlow AI*\n\n` +
+      `• Type or speak your order with table number\n` +
+      `• Type or speak a reservation request\n` +
+      `• Use the buttons below for quick actions\n` +
+      `• Share your phone number for loyalty rewards`,
+      { parse_mode: 'Markdown', ...mainKeyboard }
+    );
   });
 
-  // 3. Core Order Processing & Loyalty Integration
-  async function processAndSaveOrder(ctx, parsedOrder, source) {
-    if (!parsedOrder || !parsedOrder.items || parsedOrder.items.length === 0) {
-      return ctx.reply("❌ Couldn't identify any menu items in your request. Please check the menu and try again.");
+  // ─── Contact / Phone ──────────────────────────────────────
+  bot.on(message('contact'), async (ctx) => {
+    const phone = ctx.message.contact.phone_number;
+    ctx.session = ctx.session || {};
+    ctx.session.phoneNumber = phone;
+
+    await ctx.reply(
+      `✅ *Phone linked!* (${escapeMarkdown(phone)})\n\nLoyalty rewards will now sync automatically.`,
+      { parse_mode: 'Markdown', ...mainKeyboard }
+    );
+  });
+
+  // ─── Confirm / Cancel order buttons ───────────────────────
+  bot.action(/^confirm_order:(.+)$/, async (ctx) => {
+    const orderId = ctx.match[1];
+    const pending = ctx.session?.pendingOrder;
+
+    if (!pending || pending.tempId !== orderId) {
+      return ctx.answerCbQuery('This order is no longer valid.');
     }
 
-    const activeMenu = await MenuItem.find({ isAvailable: true });
+    try {
+      // Save Order to MongoDB
+      const newOrder = await Order.create(pending.data);
+
+      // Emit to Kitchen KDS (Stock deduction happens in server.js when status changes to 'ready')
+      try {
+        const io = getIO();
+        if (io) io.to('kitchen').emit('order:new', newOrder);
+      } catch (e) {
+        console.warn('Socket emit failed:', e.message);
+      }
+
+      delete ctx.session.pendingOrder;
+
+      let summary = `✅ *Order Confirmed & Sent to Kitchen!*\n` +
+        `*Table ${pending.data.tableNumber}*\n\n`;
+
+      pending.data.items.forEach((i) => {
+        summary += `• *${escapeMarkdown(i.name)}* ×${i.quantity} — ₹${i.price * i.quantity}\n`;
+        if (i.customization) summary += `   _${escapeMarkdown(i.customization)}_\n`;
+      });
+
+      summary += `\n*Total:* ₹${pending.data.totalAmount}\n` +
+        `⚡ Status: *In Queue* 🟡`;
+
+      await ctx.editMessageText(summary, { parse_mode: 'Markdown' });
+      await ctx.reply('You can track this order anytime with ⚡ Active Orders', mainKeyboard);
+    } catch (err) {
+      console.error('Confirm order error:', err);
+      await ctx.answerCbQuery('Failed to place order. Please try again.');
+    }
+  });
+
+  bot.action('cancel_order', async (ctx) => {
+    delete ctx.session?.pendingOrder;
+    await ctx.editMessageText('❌ Order cancelled.');
+    await ctx.reply('What would you like to do next?', mainKeyboard);
+  });
+
+  // ─── Core order processing ───
+  async function processAndSaveOrder(ctx, parsedOrder, source, rawText = '') {
+    if (!parsedOrder?.items?.length) {
+      return ctx.reply(
+        "❌ Couldn't identify any menu items.\n\n" +
+        "To reserve a table say: *Book table for 2 guests*",
+        { parse_mode: 'Markdown', ...mainKeyboard }
+      );
+    }
+
+    const activeMenu = await getActiveMenu();
     let totalAmount = 0;
     const orderItems = [];
 
-    // Match parsed items against active DB menu
     for (const item of parsedOrder.items) {
-      const menuItem = activeMenu.find(m => m._id.toString() === item.menuItemId);
-      if (menuItem) {
-        totalAmount += menuItem.price * item.quantity;
-        orderItems.push({
-          menuItem: menuItem._id,
-          name: menuItem.name,
-          price: menuItem.price,
-          quantity: item.quantity,
-          customization: item.customization || ''
-        });
+      const menuItem = activeMenu.find(
+        (m) =>
+          m._id.toString() === item.menuItemId ||
+          m.name.toLowerCase() === (item.name || '').toLowerCase()
+      );
 
-        // Update inventory count
-        menuItem.stockCount = Math.max(0, menuItem.stockCount - item.quantity);
-        await menuItem.save();
+      if (!menuItem) continue;
+
+      if (menuItem.stockCount < item.quantity) {
+        return ctx.reply(
+          `⚠️ Only *${menuItem.stockCount}* unit(s) of *${escapeMarkdown(menuItem.name)}* left.`,
+          { parse_mode: 'Markdown', ...mainKeyboard }
+        );
       }
+
+      totalAmount += menuItem.price * item.quantity;
+      orderItems.push({
+        menuItem: menuItem._id,
+        name: menuItem.name,
+        price: menuItem.price,
+        quantity: item.quantity,
+        customization: item.customization || ''
+      });
     }
 
     if (orderItems.length === 0) {
-      return ctx.reply("❌ None of the requested items match our active restaurant menu.");
+      return ctx.reply('❌ None of the requested items are currently available.', mainKeyboard);
     }
 
-    // Process Loyalty Visit & Calculate Perks
-    // Uses Telegram ID as fallback key if phone was not shared
-    const userName = ctx.from.first_name || 'Customer';
-    const userPhone = `tg_${ctx.from.id}`;
-    const { customer, perk } = await processCustomerLoyalty(userName, userPhone);
+    const tableNumber =
+      parsedOrder.tableNumber ||
+      extractTableNumber(rawText) ||
+      ctx.session?.lastTable ||
+      '01';
 
-    // Apply percentage discount if unlocked (>30 visits)
-    let finalAmount = totalAmount;
-    if (perk && perk.type === 'DISCOUNT' && perk.discountPercent > 0) {
-      const discount = (totalAmount * perk.discountPercent) / 100;
-      finalAmount = Math.round(totalAmount - discount);
-    }
+    ctx.session.lastTable = tableNumber;
 
-    // Save Order to MongoDB
-    const newOrder = await Order.create({
-      tableNumber: 1,
+    const orderData = {
+      tableNumber,
       telegramId: ctx.from.id.toString(),
+      customerChatId: ctx.chat.id.toString(),
+      customerName: ctx.from.first_name || 'Customer',
+      telegramUsername: ctx.from.username || null,
       items: orderItems,
-      source: source,
-      totalAmount: finalAmount
+      source,
+      totalAmount,
+      overallStatus: 'in_queue',
+      rawText: rawText || null
+    };
+
+    const tempId = Date.now().toString(36);
+    ctx.session.pendingOrder = { tempId, data: orderData };
+
+    let preview = `🛒 *Please confirm your order*\n*Table ${tableNumber}*\n\n`;
+    orderItems.forEach((i) => {
+      preview += `• *${escapeMarkdown(i.name)}* ×${i.quantity} — ₹${i.price * i.quantity}\n`;
+      if (i.customization) preview += `   _${escapeMarkdown(i.customization)}_\n`;
     });
+    preview += `\n*Total: ₹${totalAmount}*`;
 
-    // Notify Kitchen Display System (KDS) via Socket.io
-    try {
-      const io = getIO();
-      io.to('kitchen').emit('order:new', newOrder);
-    } catch (e) {
-      console.log('⚠️ Socket notification warning:', e.message);
-    }
-
-    // Construct Telegram Confirmation Summary
-    let summary = `✅ *Order Confirmed!* (Table 1)\n\n`;
-    orderItems.forEach(i => {
-      summary += `• *${i.name}* x${i.quantity} - ₹${i.price * i.quantity}\n`;
-      if (i.customization) summary += `  _Note: ${i.customization}_\n`;
+    await ctx.reply(preview, {
+      parse_mode: 'Markdown',
+      ...Markup.inlineKeyboard([
+        [
+          Markup.button.callback('✅ Confirm Order', `confirm_order:${tempId}`),
+          Markup.button.callback('❌ Cancel', 'cancel_order')
+        ]
+      ])
     });
-
-    if (parsedOrder.waiterNote) {
-      summary += `\n🔔 *Staff Request:* ${parsedOrder.waiterNote}\n`;
-    }
-
-    summary += `\n*Subtotal:* ₹${totalAmount}\n`;
-
-    // Append Loyalty Perk Details to Message
-    if (perk) {
-      summary += `\n${perk.title}\n_${perk.description}_\n`;
-      if (perk.type === 'DISCOUNT') {
-        summary += `*Discounted Total:* ~₹${totalAmount}~ ➡️ *₹${finalAmount}*\n`;
-      }
-    } else {
-      summary += `*Total Amount:* ₹${finalAmount}\n`;
-      summary += `\n💡 *Loyalty Status:* Visit #${customer.visitCount} | Complete ${11 - customer.visitCount} more visit(s) to unlock a Free Dessert! 🍨\n`;
-    }
-
-    summary += `\n⚡ *DineFlow AI:* Order sent directly to the kitchen!`;
-
-    await ctx.replyWithMarkdown(summary);
   }
 
-  // 💬 4. TEXT ORDER HANDLER
+  // ─── TEXT HANDLER ─────────────────────────────────────────
   bot.on(message('text'), async (ctx) => {
-    try {
-      await ctx.reply('💬 Reading your message...');
-      const activeMenu = await MenuItem.find({ isAvailable: true });
+    if (isRateLimited(ctx.from.id)) {
+      return ctx.reply('⏳ You’re sending messages too fast. Please wait a few seconds.');
+    }
 
-      if (!activeMenu || activeMenu.length === 0) {
-        return ctx.reply("⚠️ Menu is currently empty in MongoDB! Please insert menu items first.");
+    const text = ctx.message.text.trim();
+    ctx.session = ctx.session || {};
+
+    // Quick Actions
+    if (text === '📖 View Menu') {
+      const menuUrl = process.env.FRONTEND_URL
+        ? `${process.env.FRONTEND_URL}/menu`
+        : 'http://localhost:3000/menu';
+      return ctx.reply(`📖 Full digital menu:\n${menuUrl}`, mainKeyboard);
+    }
+
+    if (text === '⚡ Active Orders') {
+      const activeOrders = await Order.find({
+        customerChatId: ctx.chat.id.toString(),
+        overallStatus: { $in: ['in_queue', 'pending', 'preparing', 'ready'] }
+      }).sort({ createdAt: -1 }).limit(5);
+
+      if (!activeOrders.length) {
+        return ctx.reply('ℹ️ You have no active orders right now.', mainKeyboard);
       }
 
-      const parsedOrder = await parseTextOrder(ctx.message.text, activeMenu);
-      await processAndSaveOrder(ctx, parsedOrder, 'telegram_text');
+      let msg = `📊 *Your Active Orders*\n\n`;
+      activeOrders.forEach((ord, idx) => {
+        msg += `*#${idx + 1}* · Table ${ord.tableNumber} · *${ord.overallStatus.toUpperCase()}*\n`;
+        ord.items.forEach((i) => {
+          msg += `   • ${escapeMarkdown(i.name)} ×${i.quantity}\n`;
+        });
+        msg += `\n`;
+      });
+      return ctx.reply(msg, { parse_mode: 'Markdown', ...mainKeyboard });
+    }
+
+    if (text === '📅 Book a Table') {
+      return ctx.reply(
+        `🎙️ *Table Reservation*\n\n` +
+        `Send a text or voice note like:\n` +
+        `• *Book a seat for 2 people tonight at 8 PM*\n` +
+        `• *Reserve table for 4 guests tomorrow 7:30 PM*`,
+        { parse_mode: 'Markdown', ...mainKeyboard }
+      );
+    }
+
+    if (text === '💳 Pay Bill & Leave') {
+      const userName = ctx.from.first_name || 'Customer';
+      const userPhone = ctx.session?.phoneNumber || `tg_${ctx.from.id}`;
+
+      const { customer, perk } = await processCustomerLoyalty(userName, userPhone);
+
+      let msg = `🎉 *Thank you for dining with us, ${escapeMarkdown(userName)}!*\n\n` +
+        `📊 Total visits: *#${customer.visitCount}*\n`;
+
+      if (perk) {
+        msg += `\n🎁 *Reward unlocked:* ${escapeMarkdown(perk.title)}\n_${escapeMarkdown(perk.description)}_\n`;
+      } else {
+        const remaining = Math.max(0, 11 - customer.visitCount);
+        if (remaining > 0) {
+          msg += `\n💡 Complete *${remaining}* more visit(s) for a Free Dessert 🍨\n`;
+        }
+      }
+
+      msg += `\nPayment prompt has been sent to your table. Have a wonderful day! 👋`;
+      return ctx.reply(msg, { parse_mode: 'Markdown', ...mainKeyboard });
+    }
+
+    // Fast Regex Reservation Check (Bypasses AI delay for simple reservation texts)
+    const isReservationQuery = /book|booking|reserve|reservation|seat|seats|slot|slots|party|table for|people|guests|person|persons|tonight|tomorrow|today|pm|am|clock/i.test(text);
+    const hasFoodKeywords = /order|paneer|roti|tikka|naan|burger|coke|pizza|fries|chicken|samosa|biryani|dal|lassi|coffee|jamun|plate|plates/i.test(text);
+
+    if (isReservationQuery && !hasFoodKeywords) {
+      const guestMatch = text.match(/\d+/);
+      const guestCount = guestMatch ? parseInt(guestMatch[0], 10) : 2;
+
+      const newReservation = await Reservation.create({
+        customerName: ctx.from.first_name || 'Guest',
+        customerChatId: ctx.chat.id.toString(),
+        telegramId: ctx.from.id.toString(),
+        bookingDetails: text,
+        guestCount: guestCount,
+        status: 'confirmed'
+      });
+
+      try {
+        const io = getIO();
+        if (io) io.emit('reservation:new', newReservation);
+      } catch (e) {}
+
+      return ctx.reply(
+        `🎉 *Table & Seat Reservation Confirmed!*\n\n` +
+        `• *Name:* ${escapeMarkdown(ctx.from.first_name || 'Guest')}\n` +
+        `• *Request:* "${escapeMarkdown(text)}"\n` +
+        `• *Status:* Confirmed & Synced to Manager Panel ✅`,
+        { parse_mode: 'Markdown', ...mainKeyboard }
+      );
+    }
+
+    // Main AI Flow
+    try {
+      await ctx.reply('💬 Understanding your request…');
+
+      const activeMenu = await getActiveMenu();
+      if (!activeMenu.length) {
+        return ctx.reply('⚠️ Menu is currently empty. Please try again later.', mainKeyboard);
+      }
+
+      const parsed = await parseTextOrder(text, activeMenu);
+
+      if (parsed?.isReservation) {
+        const newReservation = await Reservation.create({
+          customerName: ctx.from.first_name || 'Guest',
+          customerChatId: ctx.chat.id.toString(),
+          telegramId: ctx.from.id.toString(),
+          bookingDetails: text,
+          guestCount: parsed.guestCount || 2,
+          bookingTime: parsed.bookingTime || 'As requested',
+          status: 'confirmed'
+        });
+
+        try {
+          const io = getIO();
+          if (io) io.emit('reservation:new', newReservation);
+        } catch (e) {}
+
+        return ctx.reply(
+          `🎉 *Table Reservation Confirmed!*\n\n` +
+          `• *Name:* ${escapeMarkdown(ctx.from.first_name || 'Guest')}\n` +
+          `• *Guests:* ${parsed.guestCount || 2}\n` +
+          `• *Details:* "${escapeMarkdown(text)}"\n` +
+          `• *Status:* Confirmed ✅`,
+          { parse_mode: 'Markdown', ...mainKeyboard }
+        );
+      }
+
+      await processAndSaveOrder(ctx, parsed, 'telegram_text', text);
     } catch (err) {
-      console.error('❌ Detailed Text Order Error:', err);
-      ctx.reply(`⚠️ Failed to process order: ${err.message || 'Unknown error'}`);
+      console.error('❌ Text handler error:', err);
+      await ctx.reply(`⚠️ Failed to process: ${err.message || 'Unknown error'}`, mainKeyboard);
     }
   });
 
-  // 🎙️ 5. VOICE ORDER HANDLER
+  // ─── VOICE HANDLER ────────────────────────────────────────
   bot.on(message('voice'), async (ctx) => {
+    if (isRateLimited(ctx.from.id)) {
+      return ctx.reply('⏳ You’re sending messages too fast. Please wait a few seconds.');
+    }
+
     try {
-      await ctx.reply('🎙️ Processing voice note...');
-      const activeMenu = await MenuItem.find({ isAvailable: true });
+      await ctx.reply('🎙️ Processing your voice note…');
 
-      if (!activeMenu || activeMenu.length === 0) {
-        return ctx.reply("⚠️ Menu is currently empty in MongoDB! Please insert menu items first.");
-      }
-
+      const activeMenu = await getActiveMenu();
       const voiceFile = await ctx.telegram.getFile(ctx.message.voice.file_id);
       const fileUrl = `https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${voiceFile.file_path}`;
 
       const response = await fetch(fileUrl);
-      const arrayBuffer = await response.arrayBuffer();
-      const audioBuffer = Buffer.from(arrayBuffer);
+      if (!response.ok) throw new Error('Could not download voice file');
 
-      const parsedOrder = await parseAudioOrder(audioBuffer, 'audio/ogg', activeMenu);
-      await processAndSaveOrder(ctx, parsedOrder, 'telegram_voice');
+      const audioBuffer = Buffer.from(await response.arrayBuffer());
+      const parsed = await parseAudioOrder(audioBuffer, 'audio/ogg', activeMenu);
+
+      if (parsed?.isReservation) {
+        const newReservation = await Reservation.create({
+          customerName: ctx.from.first_name || 'Guest',
+          customerChatId: ctx.chat.id.toString(),
+          telegramId: ctx.from.id.toString(),
+          bookingDetails: `Voice: ${parsed.guestCount || 2} guests @ ${parsed.bookingTime || 'requested time'}`,
+          guestCount: parsed.guestCount || 2,
+          bookingTime: parsed.bookingTime || 'As requested',
+          status: 'confirmed',
+          source: 'telegram_voice'
+        });
+
+        try {
+          const io = getIO();
+          if (io) io.emit('reservation:new', newReservation);
+        } catch (e) {}
+
+        return ctx.reply(
+          `🎉 *Voice Reservation Confirmed!*\n\n` +
+          `• *Guests:* ${parsed.guestCount || 2}\n` +
+          `• *Timing:* ${escapeMarkdown(parsed.bookingTime || 'As requested')}\n` +
+          `• *Status:* Reserved & Synced to Manager Panel ✅`,
+          { parse_mode: 'Markdown', ...mainKeyboard }
+        );
+      }
+
+      await processAndSaveOrder(ctx, parsed, 'telegram_voice');
     } catch (err) {
-      console.error('❌ Detailed Voice Order Error:', err);
-      ctx.reply(`⚠️ Failed to process voice note: ${err.message || 'Unknown error'}`);
+      console.error('❌ Voice handler error:', err);
+      await ctx.reply(`⚠️ Failed to process voice note: ${err.message || 'Unknown error'}`, mainKeyboard);
     }
   });
 
-  bot.launch();
-  console.log('🤖 Telegram Bot Running (Text + Voice + Share Contact Loyalty ready)...');
+  bot.launch()
+    .then(() => console.log('🤖 Telegram Bot running (Optimized & Stock Sync Safe)'))
+    .catch((err) => console.error('Bot launch failed:', err));
+
+  process.once('SIGINT', () => bot.stop('SIGINT'));
+  process.once('SIGTERM', () => bot.stop('SIGTERM'));
 }

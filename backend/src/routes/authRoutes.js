@@ -1,22 +1,66 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import passport from 'passport';
+import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
 import User from '../models/User.js';
 import Customer from '../models/Customer.js';
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'dineflow_secret_key_2026';
 
+// 🌐 Dynamic Production/Local Environment URLs
+const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:5000';
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+
+// --------------------------------------------------
+// 🔑 PASSPORT GOOGLE OAUTH STRATEGY CONFIGURATION
+// --------------------------------------------------
+passport.use(
+  new GoogleStrategy(
+    {
+      clientID: process.env.GOOGLE_CLIENT_ID || 'PENDING_GOOGLE_CLIENT_ID',
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET || 'PENDING_GOOGLE_CLIENT_SECRET',
+      callbackURL: `${BACKEND_URL}/api/auth/google/callback`,
+    },
+    async (accessToken, refreshToken, profile, done) => {
+      try {
+        const email = profile.emails[0]?.value;
+        let user = await User.findOne({ email });
+
+        if (!user) {
+          // First time Google Sign-In -> create verified account
+          user = await User.create({
+            name: profile.displayName,
+            email: email,
+            role: 'manager',
+            isVerified: true,
+            googleId: profile.id,
+          });
+        } else if (!user.googleId) {
+          // Link Google ID if existing email logs in
+          user.googleId = profile.id;
+          user.isVerified = true;
+          await user.save();
+        }
+
+        return done(null, user);
+      } catch (err) {
+        return done(err, null);
+      }
+    }
+  )
+);
+
 /**
- * 💡 SHARED HELPER FUNCTION
- * Used by both Web Guest Check-in & Telegram Bot to update visits and calculate perks
+ * 💡 SHARED HELPER FUNCTION (Guest Check-in & Loyalty)
  */
 export async function processCustomerLoyalty(name, phone) {
   let customer = await Customer.findOne({ phone });
 
   if (customer) {
     customer.visitCount += 1;
-    if (name) customer.name = name; // Update name if provided
+    if (name) customer.name = name;
     customer.lastVisit = Date.now();
     await customer.save();
   } else {
@@ -28,12 +72,10 @@ export async function processCustomerLoyalty(name, phone) {
     await customer.save();
   }
 
-  // Calculate Loyalty Perk based on visit count
   let perk = null;
   let discountPercent = 0;
 
   if (customer.visitCount > 30) {
-    // Random discount between 5% and 10%
     discountPercent = Math.floor(Math.random() * (10 - 5 + 1)) + 5;
     perk = {
       type: 'DISCOUNT',
@@ -87,7 +129,33 @@ router.post('/guest-checkin', async (req, res) => {
 });
 
 // --------------------------------------------------
-// 2. REGISTER STAFF / USER & SEND OTP
+// 2. GOOGLE OAUTH ROUTES
+// --------------------------------------------------
+router.get(
+  '/google',
+  passport.authenticate('google', { scope: ['profile', 'email'], session: false })
+);
+
+router.get(
+  '/google/callback',
+  passport.authenticate('google', { session: false, failureRedirect: `${FRONTEND_URL}/login?error=auth_failed` }),
+  (req, res) => {
+    const token = jwt.sign(
+      { id: req.user._id, role: req.user.role, email: req.user.email },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    const userData = encodeURIComponent(
+      JSON.stringify({ id: req.user._id, name: req.user.name, email: req.user.email, role: req.user.role })
+    );
+
+    res.redirect(`${FRONTEND_URL}/login?token=${token}&user=${userData}`);
+  }
+);
+
+// --------------------------------------------------
+// 3. REGISTER STAFF / USER & SEND OTP
 // --------------------------------------------------
 router.post('/register', async (req, res) => {
   try {
@@ -100,14 +168,14 @@ router.post('/register', async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(password, 10);
     const generatedOtp = Math.floor(100000 + Math.random() * 900000).toString();
-    const otpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes expiry
+    const otpExpires = new Date(Date.now() + 10 * 60 * 1000);
 
     if (!user) {
       user = new User({
         name,
         email,
         password: hashedPassword,
-        role: role || 'customer',
+        role: role || 'kitchen',
         otp: generatedOtp,
         otpExpires
       });
@@ -127,7 +195,7 @@ router.post('/register', async (req, res) => {
 });
 
 // --------------------------------------------------
-// 3. VERIFY OTP
+// 4. VERIFY OTP
 // --------------------------------------------------
 router.post('/verify-otp', async (req, res) => {
   try {
@@ -159,7 +227,7 @@ router.post('/verify-otp', async (req, res) => {
 });
 
 // --------------------------------------------------
-// 4. LOGIN USER
+// 5. LOGIN USER
 // --------------------------------------------------
 router.post('/login', async (req, res) => {
   try {

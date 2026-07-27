@@ -1,61 +1,117 @@
-import { groq } from '../config/groq.js';
-import { File } from 'buffer';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
-/**
- * 💬 TEXT ORDER PARSER (Groq + Llama 3.3 70B JSON Mode)
- */
-export async function parseTextOrder(userText, availableMenu) {
-  const menuSummary = availableMenu.map(m => ({ 
-    menuItemId: m._id.toString(), 
-    name: m.name, 
-    price: m.price 
-  }));
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-  const systemPrompt = `You are DineFlow AI, a restaurant ordering engine.
-Match the user request to this menu:
-${JSON.stringify(menuSummary)}
+// 💬 Text Order & Reservation Parser
+export async function parseTextOrder(userText, menuItems) {
+  try {
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
-Output ONLY valid JSON matching this schema:
-{
-  "items": [
-    {
-      "menuItemId": "exact MongoDB menuItemId string",
-      "name": "dish name",
-      "quantity": 1,
-      "customization": "e.g. less spicy, no onions"
-    }
-  ],
-  "waiterNote": "optional non-food request"
-}`;
+    const menuListStr = menuItems.map(item => `- ${item.name} (ID: ${item._id}, Price: ₹${item.price})`).join('\n');
 
-  const completion = await groq.chat.completions.create({
-    model: 'llama-3.3-70b-versatile',
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userText }
-    ],
-    response_format: { type: 'json_object' }
-  });
+    const prompt = `
+You are an AI order and reservation parser for a restaurant.
 
-  return JSON.parse(completion.choices[0].message.content);
+Available Menu:
+${menuListStr}
+
+User Input: "${userText}"
+
+Rules:
+1. IF the user is asking to BOOK or RESERVE a table/seat/party (e.g., "book table for 4", "reserve seat at 7 PM", "seat for 2 people"):
+   Return ONLY JSON in this format:
+   {
+     "isReservation": true,
+     "guestCount": <number_of_guests or 2>,
+     "bookingTime": "<extracted_time_or_date_or_evening>"
+   }
+
+2. IF the user is ordering FOOD items from the menu:
+   Return ONLY JSON in this format:
+   {
+     "isReservation": false,
+     "tableNumber": "<table number if mentioned, else default '01'>",
+     "items": [
+       {
+         "menuItemId": "<matching_id_from_menu>",
+         "name": "<matching_item_name>",
+         "quantity": <number>,
+         "customization": "<any special instructions or empty string>"
+       }
+     ]
+   }
+
+Return strictly valid JSON only. Do not add markdown backticks or extra text.
+`;
+
+    const result = await model.generateContent(prompt);
+    const textResponse = result.response.text().trim();
+
+    // Clean JSON string
+    const cleanJson = textResponse.replace(/^```json\s*/, '').replace(/```$/, '').trim();
+    return JSON.parse(cleanJson);
+  } catch (err) {
+    console.error('AI Text Parser Error:', err);
+    throw new Error('Failed to parse text input');
+  }
 }
 
-/**
- * 🎙️ VOICE ORDER PARSER (Groq Whisper -> Groq Llama)
- */
-export async function parseAudioOrder(audioBuffer, mimeType, availableMenu) {
-  // 1. Transcribe audio buffer using Groq Whisper
-  const audioFile = new File([audioBuffer], 'voice_note.ogg', { type: mimeType || 'audio/ogg' });
+// 🎙️ Voice Order & Reservation Parser
+export async function parseAudioOrder(audioBuffer, mimeType, menuItems) {
+  try {
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
-  const transcription = await groq.audio.transcriptions.create({
-    file: audioFile,
-    model: 'whisper-large-v3-turbo',
-    language: 'hi', // Supports Hindi, Hinglish, English seamlessly
-    response_format: 'text'
-  });
+    const menuListStr = menuItems.map(item => `- ${item.name} (ID: ${item._id}, Price: ₹${item.price})`).join('\n');
 
-  console.log('🎙️ Whisper Transcription:', transcription);
+    const base64Audio = audioBuffer.toString('base64');
 
-  // 2. Parse transcribed text through Llama 3.3
-  return await parseTextOrder(transcription, availableMenu);
+    const audioPart = {
+      inlineData: {
+        data: base64Audio,
+        mimeType: mimeType || 'audio/ogg',
+      },
+    };
+
+    const prompt = `
+Listen to this voice recording for a restaurant order or reservation.
+
+Available Menu:
+${menuListStr}
+
+Rules:
+1. IF the user is asking to BOOK/RESERVE a table, seat, or party in the voice note (e.g. "Reserve a table for 4 people at 8 PM"):
+   Return ONLY JSON:
+   {
+     "isReservation": true,
+     "guestCount": <number_of_guests_detected_or_2>,
+     "bookingTime": "<detected_time_or_date>"
+   }
+
+2. IF the user is ORDERING FOOD:
+   Return ONLY JSON:
+   {
+     "isReservation": false,
+     "tableNumber": "<table_number_if_spoken_else_'01'>",
+     "items": [
+       {
+         "menuItemId": "<matching_id_from_menu>",
+         "name": "<matching_item_name>",
+         "quantity": <number>,
+         "customization": "<special requests>"
+       }
+     ]
+   }
+
+Return strictly valid JSON only without backticks or prose.
+`;
+
+    const result = await model.generateContent([prompt, audioPart]);
+    const textResponse = result.response.text().trim();
+
+    const cleanJson = textResponse.replace(/^```json\s*/, '').replace(/```$/, '').trim();
+    return JSON.parse(cleanJson);
+  } catch (err) {
+    console.error('AI Audio Parser Error:', err);
+    throw new Error('Failed to parse audio recording');
+  }
 }
