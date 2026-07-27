@@ -1,10 +1,12 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { UtensilsCrossed, Mail, Lock, User, ArrowRight } from 'lucide-react';
 
-export default function AuthPage() {
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5000';
+
+function AuthContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -60,7 +62,7 @@ export default function AuthPage() {
 
     try {
       if (step === 'otp') {
-        const res = await fetch('http://localhost:5000/api/auth/verify-otp', {
+        const res = await fetch(`${API_BASE_URL}/api/auth/verify-otp`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email: formData.email, otp: formData.otp }),
@@ -75,7 +77,7 @@ export default function AuthPage() {
       }
 
       if (isLogin) {
-        const res = await fetch('http://localhost:5000/api/auth/login', {
+        const res = await fetch(`${API_BASE_URL}/api/auth/login`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email: formData.email, password: formData.password }),
@@ -87,7 +89,7 @@ export default function AuthPage() {
         localStorage.setItem('user', JSON.stringify(data.user));
         handleRoleRedirect(data.user.role);
       } else {
-        const res = await fetch('http://localhost:5000/api/auth/register', {
+        const res = await fetch(`${API_BASE_URL}/api/auth/register`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(formData),
@@ -106,7 +108,7 @@ export default function AuthPage() {
   };
 
   const handleGoogleAuth = () => {
-    window.location.href = 'http://localhost:5000/api/auth/google';
+    window.location.href = `${API_BASE_URL}/api/auth/google`;
   };
 
   return (
@@ -254,5 +256,14 @@ export default function AuthPage() {
         )}
       </div>
     </div>
+  );
+}
+
+// 🛑 EXPORT WITH SUSPENSE WRAPPER (Fixes Next.js Vercel Build Error)
+export default function AuthPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-[#0F0F10] text-white flex items-center justify-center font-sans text-xs">Loading Auth Session...</div>}>
+      <AuthContent />
+    </Suspense>
   );
 }
