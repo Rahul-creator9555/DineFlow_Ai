@@ -1,7 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { MessageSquare, X, Send, Bot, Sparkles, Mic, MicOff } from 'lucide-react';
+
+// 🌐 Dynamic Production API Endpoint Configuration
+const API_BASE_URL = 
+  process.env.NEXT_PUBLIC_API_BASE_URL || 
+  process.env.NEXT_PUBLIC_BACKEND_URL || 
+  'https://dineflow-backend-tt3y.onrender.com';
 
 export default function SimulatedChatWidget() {
   const [isOpen, setIsOpen] = useState(false);
@@ -13,6 +19,11 @@ export default function SimulatedChatWidget() {
   const [inputMsg, setInputMsg] = useState('');
   const [isListening, setIsListening] = useState(false);
   const [loading, setLoading] = useState(false);
+  const chatEndRef = useRef(null);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
   // 🎙️ Speech Recognition (Voice Input)
   const handleVoiceInput = () => {
@@ -23,7 +34,7 @@ export default function SimulatedChatWidget() {
 
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     const recognition = new SpeechRecognition();
-    recognition.lang = 'en-US';
+    recognition.lang = 'en-IN'; // Optimized for English / Indian accent
 
     recognition.onstart = () => setIsListening(true);
     recognition.onend = () => setIsListening(false);
@@ -40,27 +51,29 @@ export default function SimulatedChatWidget() {
     e.preventDefault();
     if (!inputMsg && (!inputName || !inputPhone)) return;
 
-    const userText = inputMsg || `Check-in: ${inputName} (${inputPhone})`;
+    const textToSend = inputMsg;
+    const userText = textToSend || `Check-in: ${inputName} (${inputPhone})`;
     setMessages((prev) => [...prev, { sender: 'user', text: userText }]);
+    setInputMsg('');
     setLoading(true);
 
     try {
-      const res = await fetch('http://localhost:5000/api/auth/simulated-bot', {
+      const res = await fetch(`${API_BASE_URL}/api/auth/simulated-bot`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: inputName || 'Voice Guest',
           phone: inputPhone || '9999999999',
-          message: inputMsg,
+          message: textToSend,
           tableNumber: '01'
         }),
       });
       const data = await res.json();
 
-      setMessages((prev) => [...prev, { sender: 'bot', text: data.reply }]);
-      setInputMsg('');
+      setMessages((prev) => [...prev, { sender: 'bot', text: data.reply || 'Order processed successfully!' }]);
     } catch (err) {
-      setMessages((prev) => [...prev, { sender: 'bot', text: '❌ Error processing AI request.' }]);
+      console.error('Simulated Bot Error:', err);
+      setMessages((prev) => [...prev, { sender: 'bot', text: '❌ Error processing AI request. Please check backend API server.' }]);
     } finally {
       setLoading(false);
     }
@@ -88,15 +101,15 @@ export default function SimulatedChatWidget() {
               </div>
               <div>
                 <h3 className="text-sm font-black text-white">Voice & Chat Order AI</h3>
-                <p className="text-[10px] text-[#9E9EAC]">Powered by DineFlow NLP Engine</p>
+                <p className="text-[10px] text-emerald-400 font-semibold">● Online • Live KDS Sync</p>
               </div>
             </div>
-            <button onClick={() => setIsOpen(false)} className="text-[#9E9EAC] hover:text-white">
+            <button onClick={() => setIsOpen(false)} className="text-[#9E9EAC] hover:text-white p-1">
               <X className="w-5 h-5" />
             </button>
           </div>
 
-          {/* Messages */}
+          {/* Messages Stream */}
           <div className="flex-1 p-4 overflow-y-auto space-y-3 bg-[#0F0F10]">
             {messages.map((m, idx) => (
               <div key={idx} className={`flex ${m.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
@@ -110,6 +123,7 @@ export default function SimulatedChatWidget() {
               </div>
             ))}
             {loading && <div className="text-[10px] text-[#9E9EAC] font-mono animate-pulse">Processing Order & AI Response...</div>}
+            <div ref={chatEndRef} />
           </div>
 
           {/* Controls Form */}
@@ -143,13 +157,14 @@ export default function SimulatedChatWidget() {
                 type="button"
                 onClick={handleVoiceInput}
                 className={`p-2 rounded-xl transition ${isListening ? 'bg-rose-600 text-white animate-bounce' : 'bg-[#2E2E32] text-[#9E9EAC] hover:text-white'}`}
+                title="Click to speak"
               >
                 {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
               </button>
               <button
                 type="submit"
-                disabled={loading}
-                className="bg-[#E67E33] hover:bg-[#d47029] text-white p-2 rounded-xl transition"
+                disabled={loading || (!inputMsg.trim() && !inputName.trim())}
+                className="bg-[#E67E33] hover:bg-[#d47029] text-white p-2 rounded-xl transition disabled:opacity-50"
               >
                 <Send className="w-4 h-4" />
               </button>

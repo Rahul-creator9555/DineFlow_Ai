@@ -165,7 +165,6 @@ export function initTelegramBot() {
 
   // ─── Core order processing ───
   async function processAndSaveOrder(ctx, parsedOrder, source, rawText = '') {
-    // 🛑 Fix: Ensure session object is initialized safely
     ctx.session = ctx.session || {};
 
     if (!parsedOrder?.items?.length) {
@@ -265,7 +264,7 @@ export function initTelegramBot() {
     if (text === '📖 View Menu') {
       const menuUrl = process.env.FRONTEND_URL
         ? `${process.env.FRONTEND_URL}/menu`
-        : 'http://localhost:3000/menu';
+        : 'https://dine-flow-ai-vsy9.vercel.app/menu';
       return ctx.reply(`📖 Full digital menu:\n${menuUrl}`, mainKeyboard);
     }
 
@@ -322,7 +321,7 @@ export function initTelegramBot() {
       return ctx.reply(msg, { parse_mode: 'Markdown', ...mainKeyboard });
     }
 
-    // Fast Regex Reservation Check (Bypasses AI delay for simple reservation texts)
+    // Fast Regex Reservation Check
     const isReservationQuery = /book|booking|reserve|reservation|seat|seats|slot|slots|party|table for|people|guests|person|persons|tonight|tomorrow|today|pm|am|clock/i.test(text);
     const hasFoodKeywords = /order|paneer|roti|tikka|naan|burger|coke|pizza|fries|chicken|samosa|biryani|dal|lassi|coffee|jamun|plate|plates/i.test(text);
 
@@ -403,7 +402,6 @@ export function initTelegramBot() {
       return ctx.reply('⏳ You’re sending messages too fast. Please wait a few seconds.');
     }
 
-    // 🛑 Fix: Ensure session object is initialized safely
     ctx.session = ctx.session || {};
 
     try {
