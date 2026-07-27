@@ -262,9 +262,8 @@ export function initTelegramBot() {
 
     // Quick Actions
     if (text === '📖 View Menu') {
-      const menuUrl = process.env.FRONTEND_URL
-        ? `${process.env.FRONTEND_URL}/menu`
-        : 'https://dine-flow-ai-vsy9.vercel.app/menu';
+      // 🎯 FIXED: Direct main production URL (ignores preview branch env vars)
+      const menuUrl = 'https://dine-flow-ai-vsy9.vercel.app/menu';
       return ctx.reply(`📖 Full digital menu:\n${menuUrl}`, mainKeyboard);
     }
 
