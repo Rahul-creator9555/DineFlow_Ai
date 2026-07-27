@@ -103,6 +103,8 @@ Each table has a unique QR code. Customers scan, browse the menu with live avail
 
 Customers can reserve tables, check restaurant info, place orders, receive order updates, and track reservations through the Telegram bot.
 
+**[👉 Chat with Order_MateBot on Telegram](https://t.me/Order_MateBot)**
+
 <img src="assets/telegram.jpeg" alt="Telegram Bot Demo" width="400"/>
 
 ## Real-Time Kitchen Display System
