@@ -194,4 +194,65 @@ DineFlow AI is designed to evolve from a single-restaurant solution into a multi
 
 ---
 
+## Local Development Setup
+
+### Prerequisites
+
+- Node.js 18+
+- MongoDB (local instance or [MongoDB Atlas](https://www.mongodb.com/atlas) URI)
+- Telegram Bot Token (create one via [@BotFather](https://t.me/BotFather))
+- Google OAuth 2.0 Client ID & Secret ([Google Cloud Console](https://console.cloud.google.com/))
+- Groq API key ([Groq Console](https://console.groq.com/))
+
+### Setup Steps
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/your-username/DineFlow_Ai.git
+cd DineFlow_Ai
+
+# 2. Install backend dependencies
+cd backend
+npm install
+
+# 3. Configure environment variables
+cp .env.example .env
+# Edit .env and fill in your values (see .env.example for all required keys)
+
+# 4. Install frontend dependencies
+cd ../frontend
+npm install
+```
+
+### Environment Variables
+
+| Variable | Description |
+|---|---|
+| `PORT` | Backend port (default: 5000) |
+| `MONGO_URI` | MongoDB connection string |
+| `GROQ_API_KEY` | Groq API key for AI/NLP |
+| `TELEGRAM_BOT_TOKEN` | Telegram bot token from @BotFather |
+| `GOOGLE_CLIENT_ID` | Google OAuth client ID |
+| `GOOGLE_CLIENT_SECRET` | Google OAuth client secret |
+| `JWT_SECRET` | Secret key for JWT tokens |
+| `FRONTEND_URL` | Frontend URL (http://localhost:3000 for dev) |
+| `CLIENT_URL` | Same as FRONTEND_URL |
+| `BACKEND_URL` | Backend URL (http://localhost:5000 for dev) |
+
+### Run the Application
+
+```bash
+# Terminal 1 — Start the backend
+cd backend
+npm run dev
+
+# Terminal 2 — Start the frontend
+cd frontend
+npm run dev
+```
+
+The app will be available at `http://localhost:3000` with the API server at `http://localhost:5000`.
+
+---
+
 *Powered by DineFlow AI Engine • Vibeathon 6.0*
