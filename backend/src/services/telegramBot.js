@@ -78,6 +78,7 @@ export function initTelegramBot() {
 
   // ─── /start ───────────────────────────────────────────────
   bot.start(async (ctx) => {
+    ctx.session = ctx.session || {};
     const name = escapeMarkdown(ctx.from.first_name || 'Guest');
     await ctx.reply(
       `👋 *Welcome to DineFlow AI, ${name}!*\n\n` +
@@ -89,6 +90,7 @@ export function initTelegramBot() {
   });
 
   bot.command('help', async (ctx) => {
+    ctx.session = ctx.session || {};
     await ctx.reply(
       `📖 *How to use DineFlow AI*\n\n` +
       `• Type or speak your order with table number\n` +
@@ -113,6 +115,7 @@ export function initTelegramBot() {
 
   // ─── Confirm / Cancel order buttons ───────────────────────
   bot.action(/^confirm_order:(.+)$/, async (ctx) => {
+    ctx.session = ctx.session || {};
     const orderId = ctx.match[1];
     const pending = ctx.session?.pendingOrder;
 
@@ -154,13 +157,17 @@ export function initTelegramBot() {
   });
 
   bot.action('cancel_order', async (ctx) => {
-    delete ctx.session?.pendingOrder;
+    ctx.session = ctx.session || {};
+    delete ctx.session.pendingOrder;
     await ctx.editMessageText('❌ Order cancelled.');
     await ctx.reply('What would you like to do next?', mainKeyboard);
   });
 
   // ─── Core order processing ───
   async function processAndSaveOrder(ctx, parsedOrder, source, rawText = '') {
+    // 🛑 Fix: Ensure session object is initialized safely
+    ctx.session = ctx.session || {};
+
     if (!parsedOrder?.items?.length) {
       return ctx.reply(
         "❌ Couldn't identify any menu items.\n\n" +
@@ -396,6 +403,9 @@ export function initTelegramBot() {
       return ctx.reply('⏳ You’re sending messages too fast. Please wait a few seconds.');
     }
 
+    // 🛑 Fix: Ensure session object is initialized safely
+    ctx.session = ctx.session || {};
+
     try {
       await ctx.reply('🎙️ Processing your voice note…');
 
@@ -442,14 +452,13 @@ export function initTelegramBot() {
     }
   });
 
-  // Replace the bottom launch block with this error-proof launcher:
+  // Launch Bot safely without hanging/crashing on restart
   bot.launch({
     dropPendingUpdates: true // Ignores old accumulated messages on bot restart
   })
     .then(() => console.log('🤖 Telegram Bot running (Optimized & Stock Sync Safe)'))
     .catch((err) => {
       console.error('⚠️ Telegram Bot Launch Error:', err.message);
-      // Prevents whole Node process from crashing if Telegram API drops
     });
 
   process.once('SIGINT', () => bot.stop('SIGINT'));
