@@ -20,9 +20,18 @@ export default function Navbar() {
   }, []);
 
   const handleLogout = () => {
+    // 1. Clear all storages
     localStorage.clear();
+    sessionStorage.clear();
+
+    // 2. Expire potential token cookies
+    document.cookie = 'token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+
+    // 3. Reset local component state
     setUser(null);
-    router.push('/login');
+
+    // 4. Full browser redirect to wipe client-side cache & memory state
+    window.location.href = '/login';
   };
 
   return (
@@ -63,7 +72,7 @@ export default function Navbar() {
             </button>
           )}
 
-          {/* KITCHEN KDS LINK (Accessible by Kitchen Chef, Manager & Admin) */}
+          {/* KITCHEN KDS LINK */}
           {user && (user.role === 'kitchen' || user.role === 'manager' || user.role === 'admin') && (
             <button 
               onClick={() => router.push('/kitchen')} 
@@ -89,7 +98,7 @@ export default function Navbar() {
 
             <button 
               onClick={handleLogout} 
-              className="p-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-xl border border-rose-500/20 transition flex items-center justify-center"
+              className="p-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-xl border border-rose-500/20 transition flex items-center justify-center cursor-pointer"
               title="Logout Staff"
             >
               <LogOut className="w-4 h-4" />
@@ -98,7 +107,7 @@ export default function Navbar() {
         ) : (
           <button 
             onClick={() => router.push('/login')} 
-            className="bg-[#1A1A1C] hover:bg-[#2E2E32] border border-[#2E2E32] text-[#9E9EAC] hover:text-white font-bold text-xs px-4 py-2 rounded-xl transition flex items-center gap-2"
+            className="bg-[#1A1A1C] hover:bg-[#2E2E32] border border-[#2E2E32] text-[#9E9EAC] hover:text-white font-bold text-xs px-4 py-2 rounded-xl transition flex items-center gap-2 cursor-pointer"
           >
             <LogIn className="w-3.5 h-3.5" /> Staff Portal
           </button>
