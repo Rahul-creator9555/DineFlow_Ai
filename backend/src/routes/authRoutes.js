@@ -9,10 +9,15 @@ import Customer from '../models/Customer.js';
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'dineflow_secret_key_2026';
 
-// 🌐 Dynamic Production/Local Environment URLs
-// Top section me line 11-12 ko is tarah safe kar lo:
-const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:5000';
-const FRONTEND_URL = process.env.FRONTEND_URL || process.env.CLIENT_URL || 'http://localhost:3000';
+// 🌐 Dynamic Production/Local Environment URLs with Protocol Safety Check
+const BACKEND_URL = process.env.BACKEND_URL || 'https://dineflow-backend-tt3y.onrender.com';
+
+// Sanitize FRONTEND_URL to ensure valid HTTPS external URL
+let rawFrontendUrl = process.env.FRONTEND_URL || 'https://dine-flow-ai-vsy9.vercel.app';
+if (!rawFrontendUrl.startsWith('http://') && !rawFrontendUrl.startsWith('https://')) {
+  rawFrontendUrl = `https://${rawFrontendUrl}`;
+}
+const FRONTEND_URL = rawFrontendUrl;
 
 // --------------------------------------------------
 // 🔑 PASSPORT GOOGLE OAUTH STRATEGY CONFIGURATION
@@ -139,7 +144,7 @@ router.get(
 
 router.get(
   '/google/callback',
-  passport.authenticate('google', { session: false, failureRedirect: `${FRONTEND_URL}/login?error=auth_failed` }),
+  passport.authenticate('google', { session: false, failureRedirect: 'https://dine-flow-ai-vsy9.vercel.app/login?error=auth_failed' }),
   (req, res) => {
     const token = jwt.sign(
       { id: req.user._id, role: req.user.role, email: req.user.email },
@@ -151,7 +156,9 @@ router.get(
       JSON.stringify({ id: req.user._id, name: req.user.name, email: req.user.email, role: req.user.role })
     );
 
-    res.redirect(`${FRONTEND_URL}/login?token=${token}&user=${userData}`);
+    // 🎯 Explicitly force absolute URL redirect
+    const targetUrl = `https://dine-flow-ai-vsy9.vercel.app/login?token=${token}&user=${userData}`;
+    res.redirect(targetUrl);
   }
 );
 
