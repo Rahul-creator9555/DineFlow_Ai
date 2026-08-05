@@ -237,9 +237,9 @@ npm install
 | `GOOGLE_CLIENT_ID` | Google OAuth client ID |
 | `GOOGLE_CLIENT_SECRET` | Google OAuth client secret |
 | `JWT_SECRET` | Secret key for JWT tokens |
-| `FRONTEND_URL` | Frontend URL (http://localhost:3000 for dev) |
+| `FRONTEND_URL` | Frontend URL (http://localhost:3000 for dev) or https://dine-flow-ai-vsy9.vercel.app|
 | `CLIENT_URL` | Same as FRONTEND_URL |
-| `BACKEND_URL` | Backend URL (http://localhost:5000 for dev) |
+| `BACKEND_URL` | Backend URL (http://localhost:5000 for dev) or https://dineflow-backend-tt3y.onrender.com|
 
 ### Run the Application
 
